@@ -15,7 +15,7 @@ def dump_map_file(mapping_data, mapping_filename=None):
         sys.exit(1)
     try:
         with io.open(mapping_filename, mode='w', encoding='utf-8') as f:
-            json.dump(mapping_data, f, sort_keys=True, indent=4)
+            json.dump(mapping_data.decode('utf-8'), f, sort_keys=True, indent=4)
         print("Mapping file has been written to " +
               os.path.abspath(mapping_filename))
     except (IOError, OSError) as e:
