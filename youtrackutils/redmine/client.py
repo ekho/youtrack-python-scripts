@@ -117,7 +117,7 @@ class RedmineClient(object):
 
     def get_issue_details(self, issue_id):
         return Issue.find(issue_id,
-            include='journals,assigned_to_id,attachments,children,relations,watchers')
+            include='journals,assigned_to_id,attachments,children,relations,watchers,tags')
 
     def get_project_issues(self, _id, _limit=None, _offset=None, _skip_on_error=False):
         return_data = []
