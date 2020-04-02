@@ -4,8 +4,8 @@ import sys
 
 from youtrackutils.utils.mapfile import dump_map_file, load_map_file
 
-if sys.version_info >= (3, 0):
-    print("\nThe script doesn't support python 3. Please use python 2.7+\n")
+if sys.version_info < (3, 0):
+    print("\nThe script doesn't support python 2. Please use python 3.7+\n")
     sys.exit(1)
 
 import os
@@ -13,19 +13,21 @@ import traceback
 import re
 import getopt
 import calendar
-import urllib2
+import urllib.request, urllib.error, urllib.parse
 import youtrackutils.redmine
 import youtrack
 import time
+import io
 from youtrack.connection import Connection
 from youtrack.importHelper import create_bundle_safe
 from datetime import datetime
 from dateutil import parser
+from pyactiveresource.connection import ResourceNotFound
 
-sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)
+sys.stdout = io.TextIOWrapper(open(sys.stdout.fileno(), 'wb', 0), write_through=True)
 sys.stderr = sys.stdout
 
-CHUNK_SIZE = 100
+DEFAULT_BATCH_SIZE = 100
 
 help_url = "\
 https://www.jetbrains.com/help/youtrack/standalone/Import-from-Redmine.html"
@@ -33,7 +35,7 @@ https://www.jetbrains.com/help/youtrack/standalone/Import-from-Redmine.html"
 
 def usage():
     basename = os.path.basename(sys.argv[0])
-    print("""
+    print(("""
 Usage:
     %s [OPTIONS] rm_url yt_url [project_id ...]
 
@@ -51,25 +53,29 @@ Usage:
     %s
 
 Options:
-    -h,  Show this help and exit
-    -T TOKEN_FILE,
+    -h   Show this help and exit
+    -T TOKEN_FILE
          Path to file with permanent token
-    -t TOKEN,
+    -t TOKEN
          Value for permanent token as text
     -a API_KEY
          Redmine API Key
-    -u LOGIN,
+    -A API_KEY_FILE
+         Path to file with Redmine API Key
+    -u LOGIN
          YouTrack user login to perform import on behalf of
-    -p PASSWORD,
+    -p PASSWORD
          YouTrack user password
-    -U LOGIN,
+    -U LOGIN
          Redmine user login to perform import on behalf of
-    -P PASSWORD,
+    -P PASSWORD
          Redmine user password
-    -m MAPPING_FILE,
+    -m MAPPING_FILE
          Path to mapping file that maps columns from csv to YouTrack fields
     -d PROJECT_LEAD_LOGIN
-         YouTrack user to set as project lead for imported projects 
+         YouTrack user to set as project lead for imported projects
+    -b BATCH_SIZE
+         Size of batch. Default: 100
     -g   Generate mapping file from the defaults
     -w   Import time entries (works only with YouTrack 4.2 or higher)
     -M   Treat descriptions and comments as Markdown while importing
@@ -86,13 +92,13 @@ Examples:
     Import issues using the mapping file:
 
     $ %s -T token -a key http://redmine.company.com http://yt.company.com test 
-""" % (basename, help_url, basename, basename))
+""" % (basename, help_url, basename, basename)))
 
 
 def main():
     try:
         params = {}
-        opts, args = getopt.getopt(sys.argv[1:], 'hwsla:gu:p:U:P:m:t:T:d:M')
+        opts, args = getopt.getopt(sys.argv[1:], 'hwslgu:p:U:P:m:t:T:a:A:d:M:b:')
         for opt, val in opts:
             if opt == '-h':
                 usage()
@@ -101,6 +107,8 @@ def main():
                 params['import_time_entries'] = True
             if opt == '-a':
                 params['rm_api_key'] = val
+            elif opt == '-A':
+                check_file_and_save(val, params, 'rm_api_key_file')
             if opt == '-l':
                 params['create_redmine_linkage'] = True
             if opt == '-s':
@@ -125,6 +133,8 @@ def main():
                 params['project_lead_login'] = val
             elif opt == '-M':
                 params['use_markdown'] = True
+            elif opt == '-b':
+                params['batch_size'] = int(val)
     except getopt.GetoptError as e:
         print(e)
         usage()
@@ -152,7 +162,7 @@ def check_file_and_save(filename, params, key):
     try:
         params[key] = os.path.abspath(filename)
     except (OSError, IOError) as e:
-        print("Data file is not accessible: " + str(e))
+        print(("Data file is not accessible: " + str(e)))
         print(filename)
         sys.exit(1)
 
@@ -207,11 +217,22 @@ class RedmineImporter(object):
         self._groups = {}
         self._subsystems = {}
         self._versions = {}
+        self._tags = {}
+        self._all_users_group = None
 
         # Connecting to Redmine
-        if 'rm_api_key' in params:
+        rm_api_key = params.get('rm_api_key')
+        if not rm_api_key and 'rm_api_key_file' in params:
+            try:
+                with open(params['rm_api_key_file'], 'r') as f:
+                    rm_api_key = f.read().strip()
+            except (OSError, IOError) as e:
+                print(("Cannot load redmine api key from file: " + str(e)))
+                sys.exit(1)
+
+        if rm_api_key:
             self._source = youtrackutils.redmine.RedmineClient(
-                params['rm_api_key'],
+                rm_api_key,
                 params['rm_url']
             )
         elif 'rm_login' in params:
@@ -232,7 +253,7 @@ class RedmineImporter(object):
                 with open(params['token_file'], 'r') as f:
                     token = f.read().strip()
             except (OSError, IOError) as e:
-                print("Cannot load token from file: " + str(e))
+                print(("Cannot load token from file: " + str(e)))
                 sys.exit(1)
         if token:
             self._target = Connection(params['yt_url'], token=token)
@@ -259,13 +280,13 @@ class RedmineImporter(object):
         try:
             projects2import = self._get_projects(project_ids)
         except youtrackutils.redmine.RedmineException as e:
-            print('FATAL:', e)
+            print(('FATAL:', e))
             sys.exit(1)
 
         print('===> Import Roles')
         self._import_roles()
 
-        for project in projects2import.values():
+        for project in list(projects2import.values()):
             self._import_project(project)
 
         print('===> Apply Relations')
@@ -318,8 +339,8 @@ class RedmineImporter(object):
         if hasattr(project, 'description') and project.description is not None:
             project_desc = project.description
 
-        print("===> Importing Project '%s' (%s)" %
-              (project_name.encode('utf-8'), project_id.encode('utf-8')))
+        print(("===> Importing Project '%s' (%s)" %
+              (project_name, project_id)))
         try:
             print('Creating project...')
             self._target.getProject(project_id)
@@ -334,7 +355,7 @@ class RedmineImporter(object):
         self._import_issues(project)
 
     def _to_yt_user(self, redmine_user):
-        if isinstance(redmine_user, basestring):
+        if isinstance(redmine_user, str):
             user_id = redmine_user
         else:
             user_id = redmine_user.id
@@ -350,20 +371,28 @@ class RedmineImporter(object):
                     user.email = redmine_user.mail
                 except AttributeError:
                     pass
+
+                if not user.email and redmine_user.id == 2:
+                    user.email = 'anonymous@example.com'
+
                 try:
                     # In some cases redmine user login can be empty or missing.
                     # So, both cases should be handled.
                     user.login = redmine_user.login
                 except AttributeError:
                     pass
-                
+
+                if not user.login and redmine_user.id == 2:
+                    user.login = 'anonymous'
+
+
             if not hasattr(user, 'login') or not user.login:
-                if hasattr(user, 'email'):
+                if hasattr(user, 'email') and user.email:
                     user.login = user.email
                 else:
                     user.login = 'guest'
-                print('Cannot get login for user id=%s, set it to "%s"' %
-                      (user_id, user.login))
+                print(('Cannot get login for user id=%s, set it to "%s"' %
+                      (user_id, user.login)))
                 
             # user.login = redmine_user.login or 'guest'
             # user.email = redmine_user.mail or 'example@example.com'
@@ -386,7 +415,7 @@ class RedmineImporter(object):
         return self._users[user_id]
 
     def _to_yt_group(self, redmine_group, users=None):
-        if not isinstance(redmine_group, basestring):
+        if not isinstance(redmine_group, str):
             redmine_group = redmine_group.name
         if redmine_group not in self._groups:
             group = youtrack.Group()
@@ -408,7 +437,7 @@ class RedmineImporter(object):
         return role
 
     def _to_yt_version(self, version):
-        if isinstance(version, basestring):
+        if isinstance(version, str):
             vid = version
         else:
             vid = version.id
@@ -425,7 +454,7 @@ class RedmineImporter(object):
         return self._versions[vid]
 
     def _to_yt_subsystem(self, category):
-        if isinstance(category, basestring):
+        if isinstance(category, str):
             cid = category
         else:
             cid = category.id
@@ -481,7 +510,7 @@ class RedmineImporter(object):
                             if role not in users_by_role:
                                 users_by_role[role] = []
                             users_by_role[role].append(user)
-        for role_name, users in users_by_role.items():
+        for role_name, users in list(users_by_role.items()):
             group = self._to_yt_group('%s %s' % (project_id.upper(), role_name))
             self._create_group(group)
             self._target.addUserRoleToGroup(
@@ -489,7 +518,7 @@ class RedmineImporter(object):
             self._target.importUsers(users)
             for user in users:
                 self._target.setUserGroup(user.login, group.name)
-        for role_name, groups in groups_by_role.items():
+        for role_name, groups in list(groups_by_role.items()):
             for group in groups:
                 self._create_group(group)
                 self._target.addUserRoleToGroup(
@@ -505,7 +534,7 @@ class RedmineImporter(object):
             if hasattr(role, 'permissions'):
                 permissions = []
                 for perm in role.permissions:
-                    if isinstance(perm, basestring):
+                    if isinstance(perm, str):
                         rm_perm = perm
                     else:
                         rm_perm = perm.name
@@ -518,7 +547,7 @@ class RedmineImporter(object):
                     else:
                         permissions.append(yt_perm)
             new_roles[role.name] = permissions
-        for role_name, role_permissions in new_roles.items():
+        for role_name, role_permissions in list(new_roles.items()):
             role = self._to_yt_role(role_name)
             self._target.createRole(role)
             if role_permissions:
@@ -527,11 +556,13 @@ class RedmineImporter(object):
                     perm.name = perm_name
                     self._target.addPermissionToRole(role, perm)
 
-    def _import_issues(self, project, limit=CHUNK_SIZE):
+    def _import_issues(self, project):
         project_id = project.identifier
+        limit = self._params.get('batch_size', DEFAULT_BATCH_SIZE)
         offset = 0
         assignee_group = self._get_assignee_group_name(project_id)
         while True:
+            print(("---> Issues from {offset} to {limit}".format(offset=offset+1, limit=offset+limit)))
             issues = self._source.get_project_issues(project.id, limit, offset,
                                                      self._params.get('skip_on_error', False))
             if not issues:
@@ -540,6 +571,7 @@ class RedmineImporter(object):
             self._target.importIssues(project_id, assignee_group,
                                       [self._make_issue(issue, project_id) for issue in issues])
             for issue in issues:
+                self._add_tags(issue)
                 self._collect_relations(issue)
                 self._add_attachments(issue)
                 if self._params.get('import_time_entries', False):
@@ -550,14 +582,17 @@ class RedmineImporter(object):
     def _make_issue(self, redmine_issue, project_id):
         issue = youtrack.Issue()
         issue['comments'] = []
+        print(("--- ISSUE #{0}".format(redmine_issue.id)))
         if self._params.get('use_markdown'):
             issue['markdown'] = "true"
         try:
+            if not hasattr(redmine_issue, 'author'):
+                redmine_issue.author = 2  # set to Anonymous
             if self._params.get('create_redmine_linkage', False):
                 self._add_field_to_issue(
                     project_id, issue, "redmine_id", int(redmine_issue.id))
-            for name, value in redmine_issue.attributes.items():
-                if name in ('project', 'attachments'):
+            for name, value in list(redmine_issue.attributes.items()):
+                if name in ('project', 'attachments', 'tags'):
                     continue
                 if name == 'assigned_to' and value.name in self._groups:
                     continue
@@ -627,7 +662,7 @@ class RedmineImporter(object):
             if field_name.lower() not in [f.name.lower() for f in all_fields]:
                 self._target.createCustomFieldDetailed(
                     field_name, field_type, False, True, False, {})
-            if field_type in ('string', 'date', 'integer', 'float', 'period'):
+            if field_type in ('string', 'text', 'date', 'integer', 'float', 'period'):
                 self._target.createProjectCustomFieldDetailed(
                     project_id, field_name, 'No ' + field_name)
             else:
@@ -649,17 +684,18 @@ class RedmineImporter(object):
         if field_name in youtrack.EXISTING_FIELDS:
             return value
         self._create_field(project_id, field_name, field_type)
-        if field_type in ('string', 'date', 'integer', 'float', 'period'):
+        if field_type in ('string', 'text', 'date', 'integer', 'float', 'period'):
             return value
         field = self._target.getProjectCustomField(project_id, field_name)
         bundle = self._target.getBundle(field_type, field.bundle)
         try:
             if hasattr(value, 'value'):
                 value = value.value
-            elif hasattr(value, 'name'):
-                if not (field_type.startswith('version') or
-                        field_type.startswith('ownedField')):
-                    value = value.name
+            elif hasattr(value, 'name') and not (
+                field_type.startswith('version') or
+                field_type.startswith('ownedField')
+            ):
+                value = value.name
             self._target.addValueToBundle(bundle, value)
         except youtrack.YouTrackException as e:
             if e.response.status != 409 or e.response.reason.lower() != 'conflict':
@@ -674,6 +710,8 @@ class RedmineImporter(object):
         if field_type == 'float':
             return '%.5f' % float(value)
         if field_type == 'string':
+            return value
+        if field_type == 'text':
             return value
         if field_type == 'period':
             return '%d' % int(float(value) * 60)
@@ -695,7 +733,7 @@ class RedmineImporter(object):
         return user
 
     def _create_group(self, group):
-        if isinstance(group, basestring):
+        if isinstance(group, str):
             group = self._to_yt_group(group)
         if not hasattr(group, 'created'):
             try:
@@ -743,6 +781,50 @@ class RedmineImporter(object):
         if import_data:
             self._target.importWorkItems(self._get_yt_issue_id(issue), import_data)
 
+    def _add_tags(self, issue):
+        if not hasattr(issue, 'tags') or not issue.tags:
+            return
+        try:
+            if not self._tags:
+                self._tags = {t.name: t for t in self._target.getTags()}
+        except youtrack.YouTrackException as e:
+            print(str(e))
+            return
+
+        try:
+            yt_issue_id = self._get_yt_issue_id(issue)
+        except youtrack.YouTrackException as e:
+            print(str(e))
+            return
+
+        assigned_tags = []
+        for r_tag in issue.tags:
+            try:
+                tag = self._get_or_create_tag(r_tag.name)
+                self._target.executeCommand(yt_issue_id, command='tag '+tag.name, disable_notifications=True)
+                assigned_tags.append(tag.name)
+            except youtrack.YouTrackException as e:
+                print(str(e))
+                return
+
+        print("Issue [ %s ] assigned tags: %s" % (yt_issue_id, ', '.join(assigned_tags)))
+
+    def _get_or_create_tag(self, tag_name):
+        if tag_name not in self._tags:
+            tag = youtrack.Tag()
+            tag.name = tag_name
+            tag.untagOnResolve = False
+            tag.visibleForGroup = self._get_all_users_group().name
+            tag.updatableByGroup = None
+            self._target.createTag(tag)
+            self._tags[tag_name] = tag
+        return self._tags[tag_name]
+
+    def _get_all_users_group(self):
+        if not self._all_users_group:
+            self._all_users_group = next((g for g in self._target.getGroups() if g.name in ['All users', 'Все пользователи']), {'name': None})
+        return self._all_users_group
+
     def _add_attachments(self, issue):
         if not hasattr(issue, 'attachments'):
             return
@@ -756,19 +838,16 @@ class RedmineImporter(object):
                 attempts -= 1
                 try:
                     self._target.createAttachmentFromAttachment(
-                        self._get_yt_issue_id(issue),
-                        RedmineAttachment(attach, self._source))
+                        self._get_yt_issue_id(issue), RedmineAttachment(attach, self._source))
                     break
                 except Exception as e:
                     print(e)
                     if attempts:
-                        delay = 30 + (max_attempts - attempts - 1) * 10
-                        print("Can't import attachment: %s. Retry in %d s." %
-                              (attach.filename, delay))
+                        delay = 10 + (max_attempts - attempts - 1) * 10
+                        print(("Can't import attachment: %s. Retry in %d s." % (attach.filename, delay)))
                         time.sleep(delay)
                     else:
-                        print('Failed to import attachment: %s. Skipped.' %
-                              attach.filename)
+                        print(('Failed to import attachment: %s. Skipped.' % attach.filename))
 
     def _collect_relations(self, issue):
         link_types = {
@@ -780,7 +859,7 @@ class RedmineImporter(object):
         if hasattr(issue, 'relations'):
             for rel in issue.relations:
                 if rel.relation_type not in link_types:
-                    print('Unsuitable link type: %s. Skipped' % rel.relation_type)
+                    print(('Unsuitable link type: %s. Skipped' % rel.relation_type))
                     continue
                 from_id = rel.issue_id
                 to_id = rel.issue_to_id
@@ -801,10 +880,10 @@ class RedmineImporter(object):
             relations[from_iid] = {}
         relations[from_iid][to_iid] = None
 
-    def _apply_relations(self, limit=CHUNK_SIZE):
+    def _apply_relations(self, limit=DEFAULT_BATCH_SIZE):
         links = []
-        for link_type, ids in self._relations.items():
-            for from_id, to_ids in ids.items():
+        for link_type, ids in list(self._relations.items()):
+            for from_id, to_ids in list(ids.items()):
                 for to_id in to_ids:
                     link = youtrack.Link()
                     link.typeName = link_type
@@ -812,8 +891,8 @@ class RedmineImporter(object):
                         link.source = self._to_yt_issue_id(from_id)
                         link.target = self._to_yt_issue_id(to_id)
                     except KeyError:
-                        print("Cannot apply link (%s) to issues: %d and %d" %
-                              (link_type, from_id, to_id))
+                        print(("Cannot apply link (%s) to issues: %d and %d" %
+                              (link_type, from_id, to_id)))
                         if hasattr(link, 'source') and link.source:
                             print("The second issue was not imported")
                             continue
@@ -837,7 +916,7 @@ class RedmineAttachment(object):
         self.headers = source.headers
 
     def getContent(self):
-        return urllib2.urlopen(urllib2.Request(self.url, headers=self.headers))
+        return urllib.request.urlopen(urllib.request.Request(self.url, headers=self.headers))
 
 
 if __name__ == '__main__':

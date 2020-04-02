@@ -8,7 +8,7 @@ class RedmineResource(ActiveResource):
     root_element = None
 
     def __init__(self, attributes=None, prefix_options=None):
-        if isinstance(attributes, basestring):
+        if isinstance(attributes, str):
             self.name = attributes
         super(RedmineResource, self).__init__(attributes, prefix_options)
 
@@ -74,6 +74,7 @@ class RedmineException(Exception):
 class RedmineClient(object):
 
     def __init__(self, api_key, url, login=None, password=None):
+        RedmineResource.set_timeout = 5
         RedmineResource.site = url
         if api_key is not None:
             RedmineResource.headers = {'X-Redmine-API-Key': api_key}
@@ -94,7 +95,7 @@ class RedmineClient(object):
     def headers(self):
         headers = {}
         if RedmineResource.headers:
-            for name, value in RedmineResource.headers.items():
+            for name, value in list(RedmineResource.headers.items()):
                 headers[name] = value
         if RedmineResource.connection.auth:
             headers['Authorization'] = 'Basic ' + RedmineResource.connection.auth
@@ -136,8 +137,8 @@ class RedmineClient(object):
                 try:
                     details = self.get_issue_details(issue.id)
                     return_data.append(details)
-                except ServerError, se:
-                    print "Wasn't able to process issue " + issue.id
+                except ServerError as se:
+                    print("Wasn't able to process issue " + issue.id)
                     if not _skip_on_error:
                         raise se
             else:
@@ -145,8 +146,8 @@ class RedmineClient(object):
                     try:
                         details = self.get_issue_details(packed_issue['id'])
                         return_data.append(details)
-                    except ServerError, se:
-                        print "Wasn't able to process issue " + packed_issue['id']
+                    except ServerError as se:
+                        print("Wasn't able to process issue " + packed_issue['id'])
                         if not _skip_on_error:
                             raise se
         return return_data
@@ -171,8 +172,8 @@ class RedmineClient(object):
             try:
                 role.attributes['permissions'] = Role().find(role.id).permissions
             except (ResourceNotFound, MethodNotAllowed):
-                print "WARN: Can't get permissions for roles."
-                print "WARN: This Redmine version doesn't support this feature."
+                print("WARN: Can't get permissions for roles.")
+                print("WARN: This Redmine version doesn't support this feature.")
                 break
         return roles
 
