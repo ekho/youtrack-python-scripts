@@ -10,12 +10,25 @@
         "State": {
             "Closed": "Fixed",
             "Rejected": "Won't fix",
-            "Resolved": "Fixed"
+            "Resolved": "Fixed",
+            "New": "Submitted",
+            "Backlog": "Open",
+            "Need Feedback": "To be discussed",
+            "Solved": "Fixed",
+            "Tested": "Verified",
+            "Suspended (d)": "Suspended",
+            "Suspended PO": "Suspended",
+            "Reopened (d)": "Reopened",
+            "Testing (d)": "Testing",
+            "R2 Review (d)": "R2 Review",
+            "R2 Merge (d)": "R2 Merge",
+            "Prod (d)": "Production",
+            "Review Done": "Verified"
         },
         "Subsystem": {
             "CI/CD": "CI-CD",
-            "Monitoring & Alerting": "Monitoring and Alerting",
-            "DEV & TEST environments": "DEV & TEST environments"
+            "24/7": "24x7",
+            "Сustom handler GOTO/Pixel": "Custom handler GOTO,Pixel"
         }
     },
     "field_names": {
