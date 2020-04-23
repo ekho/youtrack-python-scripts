@@ -60,7 +60,7 @@
         "Номер спринта": "Sprint number",
         "Важность": "Importance",
         "tags": "Tags",
-        "checklist": "Checklist"
+//        "checklist": "Checklist"
     },
     "field_types": {
         "Assignee": "user[1]",
@@ -85,7 +85,7 @@
         "Sprint number": "integer",
         "Importance": "integer",
         "Tags": "enum[*]",
-        "Checklist": "text"
+//        "Checklist": "text"
     },
     "permissions": {
         "add_issue_watchers": "UPDATE_WATCHERS",

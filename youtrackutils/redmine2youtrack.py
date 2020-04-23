@@ -591,6 +591,7 @@ class RedmineImporter(object):
             if self._params.get('create_redmine_linkage', False):
                 self._add_field_to_issue(
                     project_id, issue, "redmine_id", int(redmine_issue.id))
+            checklist_value = None
             for name, value in list(redmine_issue.attributes.items()):
                 if name in ('project', 'attachments', 'tags'):
                     continue
@@ -598,6 +599,9 @@ class RedmineImporter(object):
                     continue
                 if name == 'id':
                     value = str(self._get_yt_issue_number(redmine_issue))
+                if name == 'checklist':
+                    checklist_value = str(value)
+                    continue
                 if name == 'custom_fields':
                     for field in value:
                         self._add_field_to_issue(project_id,
@@ -610,6 +614,9 @@ class RedmineImporter(object):
                     if name == 'category':
                         value = self._to_yt_subsystem(value)
                     self._add_field_to_issue(project_id, issue, name, value)
+            if checklist_value:
+                issue['description'] = issue['description'] + "\n\n#### Checklist\n" + checklist_value
+
         except Exception as e:
             print('Failed to process issue:')
             print(redmine_issue)
