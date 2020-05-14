@@ -109,6 +109,8 @@ class Connection(object):
             headers = headers.copy()
             headers['Accept'] = content_type
 
+        # print('METHOD: %s; URL: %s; BODY: %s' % (method, url, body))
+
         if url.startswith('http'):
             response, content = self.http.request(
                 url,
@@ -1168,8 +1170,20 @@ class Connection(object):
         except ValueError:
             return 0
 
+    def getYouTrackVersionNumber(self):
+        response, content = self._req('GET',
+                                      self.url + '/api/config?fields=version',
+                                      ignoreStatus=404,
+                                      content_type='application/json')
+        if response.status != 200 or not content:
+            return 0
+        try:
+            return float(json.loads(content).get('version', 0))
+        except ValueError:
+            return 0
+
     def isMarkdownSupported(self):
-        return self.getYouTrackBuildNumber() > 39406
+        return self.getYouTrackVersionNumber() >= 2019.1
 
     bundle_paths = {
         "enum": "bundle",

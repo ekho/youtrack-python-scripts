@@ -59,8 +59,8 @@
         "story_points": "Story Points",
         "Номер спринта": "Sprint number",
         "Важность": "Importance",
-        "tags": "Tags",
-//        "checklist": "Checklist"
+        "tags": "Tags"/*,
+        "checklist": "Checklist"*/
     },
     "field_types": {
         "Assignee": "user[1]",
@@ -84,8 +84,8 @@
         "Story Points": "integer",
         "Sprint number": "integer",
         "Importance": "integer",
-        "Tags": "enum[*]",
-//        "Checklist": "text"
+        "Tags": "enum[*]"/*,
+        "Checklist": "text"*/
     },
     "permissions": {
         "add_issue_watchers": "UPDATE_WATCHERS",
