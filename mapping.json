@@ -29,6 +29,26 @@
             "CI/CD": "CI-CD",
             "24/7": "24x7",
             "Сustom handler GOTO/Pixel": "Custom handler GOTO,Pixel"
+        },
+        "Type": {
+            "Internal 2.0": "Internal",
+            "DevOps Epic": "Epic",
+            "Improving": "Improvement",
+            "Task 2.0": "Task",
+            "Routine 2.0": "Routine",
+            "Periodic tasks": "Periodic",
+            "DevTask": "Task",
+            "Error": "Bug",
+            "Error Report": "Bug",
+            "Bug Report 2.0": "Bug",
+            "QA Task": "Task",
+            "DevError": "Bug",
+            "BA Epic": "Epic",
+            "DevOps Incident": "Incident",
+            "QA Epic": "Epic",
+            "DevUserStory": "Task",
+            "BA": "Task",
+            "DevOps Task": "Task"
         }
     },
     "field_names": {
